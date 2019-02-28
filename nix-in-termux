@@ -1,0 +1,140 @@
+#!/bin/sh -ue
+
+# This script installs Nix package manager inside a Termux installation.
+# Copyright (c) 2019 Alexander Sosedkin <monk@unboiled.info>
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+# Based off the official Nix install script (https://nixos.org/nix/install),
+# presumably written by Eelco Dolstra.
+
+
+# This script installs Nix package manager inside a Termux installation.
+# It does not require root, user namespaces or disabling SELinux,
+# but it relies on proot and numerous hacks instead.
+# Only tested with aarch64, may also accidentally work on x86.
+
+# Usage:
+# * Install and run Termux
+# * Execute this script inside Termux
+
+# Careful, this is carelessly written alpha-quality stuff.
+
+
+PLAYGROUND="$HOME/.nix"
+DIVE_SCRIPT="$PLAYGROUND/nix-powered"
+
+
+if [ ! -x "$PLAYGROUND/DIVESCRIPT" ]; then
+	echo "removing the previous installation..."
+	chmod -R 700 "$PLAYGROUND"
+	rm -rf "$PLAYGROUND"
+	mkdir -p "$PLAYGROUND"
+
+	echo "installing tools..."
+	pkg install -y proot bzip2 tar wget
+
+	tmpDir="$PLAYGROUND/tmp"
+	mkdir -p "$tmpDir"
+
+	echo "preparing mock /nix and /etc..."
+	mkdir "$PLAYGROUND/nix"
+	mkdir "$PLAYGROUND/etc"
+	echo 'nameserver 1.1.1.1' > "$PLAYGROUND/etc/resolv.conf"
+	mkdir "$PLAYGROUND/etc/nix/"
+	echo 'sandbox = false' > "$PLAYGROUND/etc/nix/nix.conf"  # https://github.com/NixOS/nix/issues/2632#issuecomment-457610729
+
+	case "$(uname -s).$(uname -m)" in
+		Linux.x86_64) system=x86_64-linux; hash=e229e28f250cad684c278c9007b07a24eb4ead239280c237ed2245871eca79e0;;
+		Linux.i?86) system=i686-linux; hash=223c141b7ce322aacd4003dfc79b969ee813396d2ac586cf44c0e787233b1666;;
+		Linux.aarch64) system=aarch64-linux; hash=94d3d7d2b551b228ec38f83c6f037c5e5b6aaf0805450967f800c02a827b1f41;;
+		Darwin.x86_64) system=x86_64-darwin; hash=4182a38948c9ce520993f79a5caf8ce3d49636189f4f0f7e8decbc91ddb61cd1;;
+		*) oops "sorry, there is no binary distribution of Nix for your platform";;
+	esac
+
+	url="https://nixos.org/releases/nix/nix-2.2.1/nix-2.2.1-$system.tar.bz2"
+
+	tarball="$tmpDir/$(basename "$tmpDir/nix-2.2.1-$system.tar.bz2")"
+	#tarball="$HOME/nix-2.2.1-$system.tar.bz2"
+
+	echo "downloading Nix 2.2.1 binary tarball for $system from '$url' to '$tmpDir'..."
+	wget "$url" -O "$tarball" || oops "failed to download '$url'"
+
+        hash2="$(sha256sum -b "$tarball" | cut -c1-64)"
+
+	if [ "$hash" != "$hash2" ]; then
+		oops "SHA-256 hash mismatch in '$url'; expected $hash, got $hash2"
+	fi
+
+	echo "unpacking $tarball..."
+	unpack=$tmpDir/unpack
+	mkdir -p "$unpack"
+	cleanup() {
+		rm -rf "$unpack"
+	}
+	trap cleanup EXIT INT QUIT TERM
+	< "$tarball" bzcat | tar -xf - -C "$unpack" || oops "failed to unpack '$tarball'"
+
+	script=$(echo "$unpack"/*/install)
+
+	[ -e "$script" ] || oops "installation script is missing from the binary tarball!"
+
+	INTERMEDIATE_SCRIPT="$tmpDir/intermediate_install_script"
+########
+	cat > "$INTERMEDIATE_SCRIPT" << --------EOF
+	export USER=\$(whoami)
+	export NIX_INSTALLER_NO_MODIFY_PROFILE=true
+	unset LD_LIBRARY_PATH
+	unset LD_PRELOAD
+	$script "\$@"
+--------EOF
+
+	chmod +x "$INTERMEDIATE_SCRIPT"
+
+	echo "running Nix install script in proot..."
+	proot \
+		-b "$PLAYGROUND/nix:/nix" \
+		-b "$PLAYGROUND/etc:/etc" \
+		--link2symlink \
+		"$INTERMEDIATE_SCRIPT"
+
+	echo "creating $DIVE_SCRIPT and finalizind the installation..."
+########
+	cat > "$DIVE_SCRIPT" << --------EOF
+	#!/bin/sh -e
+	export PS1="nix-powered> "
+	export USER=$(whoami)
+	unset LD_LIBRARY_PATH
+	unset LD_PRELOAD
+	echo Termux PATH \$PATH
+	TERMUX_PATH="\$PATH"
+	. \$HOME/.nix-profile/etc/profile.d/nix.sh
+	export PATH=\${PATH%":\$TERMUX_PATH"}
+	"\$@"
+--------EOF
+	chmod +x "$DIVE_SCRIPT"
+
+	echo "installation is completed."
+
+	echo "to reinstall, rm -r \"$PLAYGROUND\" and re-run the script"
+fi
+
+
+proot \
+	-b "$PLAYGROUND/nix:/nix" \
+	-b "$PLAYGROUND/etc:/etc" \
+	-b "/etc:/android-etc" \
+	--link2symlink \
+	"$DIVE_SCRIPT" "$@"
