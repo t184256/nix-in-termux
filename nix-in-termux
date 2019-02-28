@@ -37,6 +37,13 @@ PLAYGROUND="$HOME/.nix"
 DIVE_SCRIPT="$PLAYGROUND/nix-powered"
 
 
+
+oops() {
+    echo "$0:" "$@" >&2
+    exit 1
+}
+
+
 if [ ! -x "$DIVE_SCRIPT" ]; then
 	echo "removing the previous installation..."
 	chmod -R 700 "$PLAYGROUND" || true
