@@ -39,7 +39,7 @@ DIVE_SCRIPT="$PLAYGROUND/nix-powered"
 
 if [ ! -x "$DIVE_SCRIPT" ]; then
 	echo "removing the previous installation..."
-	chmod -R 700 "$PLAYGROUND"
+	chmod -R 700 "$PLAYGROUND" || true
 	rm -rf "$PLAYGROUND"
 	mkdir -p "$PLAYGROUND"
 
