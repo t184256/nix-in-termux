@@ -48,21 +48,22 @@ oops() {
 if [ ! -x "$DIVE_SCRIPT" ]; then
 	echo "removing the previous installation..."
 	chmod -R 700 "$PLAYGROUND" || true
-	rm -rf "$PLAYGROUND"
-	mkdir -p "$PLAYGROUND"
+	rm -rf "$PLAYGROUND" || oops "failed to remove $PLAYGROUND"
+	mkdir -p "$PLAYGROUND" || oops "failed to create $PLAYGROUND"
 
 	echo "installing tools..."
-	pkg install -y proot bzip2 tar wget
+	pkg install -y proot bzip2 tar wget || oops "failed to install required tools"
 
 	tmpDir="$PLAYGROUND/tmp"
-	mkdir -p "$tmpDir"
+	mkdir -p "$tmpDir" || oops "false to create $tmpDir"
 
 	echo "preparing mock /nix and /etc..."
-	mkdir "$PLAYGROUND/nix"
-	mkdir "$PLAYGROUND/etc"
-	echo 'nameserver 1.1.1.1' > "$PLAYGROUND/etc/resolv.conf"
-	mkdir "$PLAYGROUND/etc/nix/"
-	echo 'sandbox = false' > "$PLAYGROUND/etc/nix/nix.conf"  # https://github.com/NixOS/nix/issues/2632#issuecomment-457610729
+	mkdir "$PLAYGROUND/nix" || oops "failed to create $PLAYGROUND/nix"
+	mkdir "$PLAYGROUND/etc" || oops "failed to create $PLAYGROUND/etc"
+	echo 'nameserver 1.1.1.1' > "$PLAYGROUND/etc/resolv.conf" || oops "failed to create $PLAYGROUND/etc/resolv.conf"
+	mkdir "$PLAYGROUND/etc/nix/" || oops "failed to create $PLAYGROUND/etc/nix"
+	# https://github.com/NixOS/nix/issues/2632#issuecomment-457610729
+	echo 'sandbox = false' > "$PLAYGROUND/etc/nix/nix.conf" || oops "failed to create $PLAYGROUND/etc/nix/nix.conf"
 
 	case "$(uname -s).$(uname -m)" in
 		Linux.x86_64) system=x86_64-linux; hash=e229e28f250cad684c278c9007b07a24eb4ead239280c237ed2245871eca79e0;;
@@ -93,13 +94,14 @@ if [ ! -x "$DIVE_SCRIPT" ]; then
 		rm -rf "$unpack"
 	}
 	trap cleanup EXIT INT QUIT TERM
-	< "$tarball" bzcat | $TERMUX_BIN/tar -xf - -C "$unpack" || oops "failed to unpack '$tarball'"
+	< "$tarball" bzcat | $TERMUX_BIN/tar -xf - -C "$unpack" || oops "failed to unpack $tarball"
 
 	script=$(echo "$unpack"/*/install)
 
 	[ -e "$script" ] || oops "installation script is missing from the binary tarball!"
 
 	INTERMEDIATE_SCRIPT="$tmpDir/intermediate_install_script"
+	{
 ########
 	cat > "$INTERMEDIATE_SCRIPT" << --------EOF
 	export USER=\$(whoami)
@@ -108,17 +110,19 @@ if [ ! -x "$DIVE_SCRIPT" ]; then
 	unset LD_PRELOAD
 	$script "\$@"
 --------EOF
+	} || oops "failed to create $INTERMEDIATE_SCRIPT"
 
-	chmod +x "$INTERMEDIATE_SCRIPT"
+	chmod +x "$INTERMEDIATE_SCRIPT" || oops "failed to chmod +x $INTERMEDIATE_SCRIPT"
 
 	echo "running Nix install script in proot..."
 	proot \
 		-b "$PLAYGROUND/nix:/nix" \
 		-b "$PLAYGROUND/etc:/etc" \
 		--link2symlink \
-		"$INTERMEDIATE_SCRIPT"
+		"$INTERMEDIATE_SCRIPT" || oops "failed to run Nix install script in proot"
 
 	echo "creating $DIVE_SCRIPT and finalizind the installation..."
+	{
 ########
 	cat > "$DIVE_SCRIPT" << --------EOF
 	#!/bin/sh -e
@@ -132,7 +136,8 @@ if [ ! -x "$DIVE_SCRIPT" ]; then
 	export PATH=\${PATH%":\$TERMUX_PATH"}
 	"\$@"
 --------EOF
-	chmod +x "$DIVE_SCRIPT"
+	} || oops "failed to create $DIVE_SCRIPT"
+	chmod +x "$DIVE_SCRIPT" || oops "failed to chmod +x $DIVE_SCRIPT"
 
 	echo "installation is completed."
 
