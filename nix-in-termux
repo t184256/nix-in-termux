@@ -52,7 +52,7 @@ if [ ! -x "$DIVE_SCRIPT" ]; then
 	mkdir -p "$PLAYGROUND" || oops "failed to create $PLAYGROUND"
 
 	echo "installing tools..."
-	pkg install -y proot bzip2 tar wget || oops "failed to install required tools"
+	pkg install -y proot bzip2 tar curl || oops "failed to install required tools"
 
 	tmpDir="$PLAYGROUND/tmp"
 	mkdir -p "$tmpDir" || oops "false to create $tmpDir"
@@ -79,7 +79,7 @@ if [ ! -x "$DIVE_SCRIPT" ]; then
 	#tarball="$HOME/nix-2.2.1-$system.tar.bz2"
 
 	echo "downloading Nix 2.2.1 binary tarball for $system from '$url' to '$tmpDir'..."
-	$TERMUX_BIN/wget "$url" -O "$tarball" || oops "failed to download '$url'"
+	$TERMUX_BIN/curl -Lo "$tarball" "$url" || oops "failed to download '$url'"
 
         hash2="$(sha256sum -b "$tarball" | cut -c1-64)"
 
